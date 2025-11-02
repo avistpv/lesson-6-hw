@@ -1,209 +1,146 @@
-import { TaskService } from './task.service';
-import { 
-  CreateTaskData, 
-  UpdateTaskData, 
-  TaskStatus, 
-  Priority, 
-  TaskType, 
-  TaskFilters,
-  TaskOperationResult,
-  TaskDetailsResult,
-  TaskDeleteResult,
-  TaskFilterResult,
-  TaskDeadlineResult
+import {TaskService} from './task.service';
+import {
+    CreateTaskData,
+    UpdateTaskData,
+    TaskStatus,
+    Priority,
+    TaskType,
+    TaskFilters,
+    TaskOperationResult,
+    TaskDetailsResult,
+    TaskDeleteResult,
+    TaskFilterResult,
+    TaskDeadlineResult,
+    ApiResponse,
+    TaskStatistics,
+    EnhancedTaskStatistics
 } from './task.types';
 
 export class TaskController {
-  private taskService: TaskService;
+    private taskService: TaskService;
 
-  constructor(filePath?: string) {
-    this.taskService = new TaskService(filePath);
-  }
-
-  createTask(data: CreateTaskData): { success: boolean; data?: TaskType; error?: string } {
-    try {
-      const task = this.taskService.createTask(data);
-      return { success: true, data: task };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    constructor(filePath?: string) {
+        this.taskService = new TaskService(filePath);
     }
-  }
 
-  getAllTasks(): { success: boolean; data?: TaskType[]; error?: string } {
-    try {
-      const tasks = this.taskService.getAllTasks();
-      return { success: true, data: tasks };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    private handleResult<T>(serviceCall: () => T): ApiResponse<T> {
+        try {
+            const data = serviceCall();
+            return {success: true, data};
+        } catch (error) {
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            };
+        }
     }
-  }
 
-  getTaskById(id: string): { success: boolean; data?: TaskType; error?: string } {
-    try {
-      const task = this.taskService.getTaskById(id);
-      if (!task) {
-        return { success: false, error: 'Task not found' };
-      }
-      return { success: true, data: task };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    createTask(data: CreateTaskData): ApiResponse<TaskType> {
+        return this.handleResult(() => this.taskService.createTask(data));
     }
-  }
 
-  getTasksByStatus(status: TaskStatus): { success: boolean; data?: TaskType[]; error?: string } {
-    try {
-      const tasks = this.taskService.getTasksByStatus(status);
-      return { success: true, data: tasks };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    getAllTasks(): ApiResponse<TaskType[]> {
+        return this.handleResult(() => this.taskService.getAllTasks());
     }
-  }
 
-  getTasksByPriority(priority: Priority): { success: boolean; data?: TaskType[]; error?: string } {
-    try {
-      const tasks = this.taskService.getTasksByPriority(priority);
-      return { success: true, data: tasks };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    getTaskById(id: string): ApiResponse<TaskType> {
+        return this.handleResult(() => {
+            const task = this.taskService.getTaskById(id);
+            if (!task) {
+                throw new Error('Task not found');
+            }
+            return task;
+        });
     }
-  }
 
-  getTasksByAssignee(assignee: string): { success: boolean; data?: TaskType[]; error?: string } {
-    try {
-      const tasks = this.taskService.getTasksByAssignee(assignee);
-      return { success: true, data: tasks };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    getTasksByStatus(status: TaskStatus): ApiResponse<TaskType[]> {
+        return this.handleResult(() => this.taskService.getTasksByStatus(status));
     }
-  }
 
-  updateTask(id: string, data: UpdateTaskData): { success: boolean; data?: TaskType; error?: string } {
-    try {
-      const task = this.taskService.updateTask(id, data);
-      return { success: true, data: task };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    getTasksByPriority(priority: Priority): ApiResponse<TaskType[]> {
+        return this.handleResult(() => this.taskService.getTasksByPriority(priority));
     }
-  }
 
-  changeTaskStatus(id: string, status: TaskStatus): { success: boolean; data?: TaskType; error?: string } {
-    try {
-      const task = this.taskService.changeTaskStatus(id, status);
-      return { success: true, data: task };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    getTasksByAssignee(assignee: string): ApiResponse<TaskType[]> {
+        return this.handleResult(() => this.taskService.getTasksByAssignee(assignee));
     }
-  }
 
-  deleteTask(id: string): { success: boolean; error?: string } {
-    try {
-      const deleted = this.taskService.deleteTask(id);
-      if (!deleted) {
-        return { success: false, error: 'Task not found' };
-      }
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    updateTask(id: string, data: UpdateTaskData): ApiResponse<TaskType> {
+        return this.handleResult(() => this.taskService.updateTask(id, data));
     }
-  }
 
-  getTaskStatistics(): { success: boolean; data?: any; error?: string } {
-    try {
-      const statistics = this.taskService.getTaskStatistics();
-      return { success: true, data: statistics };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    changeTaskStatus(id: string, status: TaskStatus): ApiResponse<TaskType> {
+        return this.handleResult(() => this.taskService.changeTaskStatus(id, status));
     }
-  }
 
-  searchTasks(query: string): { success: boolean; data?: TaskType[]; error?: string } {
-    try {
-      const tasks = this.taskService.searchTasks(query);
-      return { success: true, data: tasks };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    deleteTask(id: string): ApiResponse<void> {
+        return this.handleResult(() => {
+            const deleted = this.taskService.deleteTask(id);
+            if (!deleted) {
+                throw new Error('Task not found');
+            }
+        });
     }
-  }
 
-  clearAllTasks(): { success: boolean; error?: string } {
-    try {
-      this.taskService.clearAllTasks();
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    getTaskStatistics(): ApiResponse<TaskStatistics> {
+        return this.handleResult(() => this.taskService.getTaskStatistics());
     }
-  }
 
-  getTaskCount(): { success: boolean; data?: number; error?: string } {
-    try {
-      const tasks = this.taskService.getAllTasks();
-      return { success: true, data: tasks.length };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    searchTasks(query: string): ApiResponse<TaskType[]> {
+        return this.handleResult(() => this.taskService.searchTasks(query));
     }
-  }
 
-  getTaskDetails(id: string): TaskDetailsResult {
-    return this.taskService.getTaskDetails(id);
-  }
-
-  createTaskWithValidation(data: CreateTaskData): TaskOperationResult {
-    return this.taskService.createTaskWithValidation(data);
-  }
-
-  updateTaskWithValidation(id: string, data: UpdateTaskData): TaskOperationResult {
-    return this.taskService.updateTaskWithValidation(id, data);
-  }
-
-  deleteTaskWithFile(id: string): TaskDeleteResult {
-    return this.taskService.deleteTaskWithFile(id);
-  }
-
-  filterTasks(filters: TaskFilters): TaskFilterResult {
-    return this.taskService.filterTasks(filters);
-  }
-
-  checkTaskDeadline(id: string): TaskDeadlineResult {
-    return this.taskService.checkTaskDeadline(id);
-  }
-
-  getOverdueTasks(): { success: boolean; data?: TaskType[]; error?: string } {
-    try {
-      const tasks = this.taskService.getOverdueTasks();
-      return { success: true, data: tasks };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    clearAllTasks(): ApiResponse<void> {
+        return this.handleResult(() => {
+            this.taskService.clearAllTasks();
+        });
     }
-  }
 
-  getTasksDueSoon(days: number = 7): { success: boolean; data?: TaskType[]; error?: string } {
-    try {
-      const tasks = this.taskService.getTasksDueSoon(days);
-      return { success: true, data: tasks };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    getTaskCount(): ApiResponse<number> {
+        return this.handleResult(() => this.taskService.getAllTasks().length);
     }
-  }
 
-  getTasksBySprint(sprintId: string): { success: boolean; data?: TaskType[]; error?: string } {
-    try {
-      const tasks = this.taskService.getTasksBySprint(sprintId);
-      return { success: true, data: tasks };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    getTaskDetails(id: string): TaskDetailsResult {
+        return this.taskService.getTaskDetails(id);
     }
-  }
 
-  getEnhancedStatistics(): { success: boolean; data?: any; error?: string } {
-    try {
-      const statistics = this.taskService.getEnhancedStatistics();
-      return { success: true, data: statistics };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    createTaskWithValidation(data: CreateTaskData): TaskOperationResult {
+        return this.taskService.createTaskWithValidation(data);
     }
-  }
 
-  initializeTasks(): { success: boolean; message?: string; error?: string } {
-    return this.taskService.initializeTasks();
-  }
+    updateTaskWithValidation(id: string, data: UpdateTaskData): TaskOperationResult {
+        return this.taskService.updateTaskWithValidation(id, data);
+    }
+
+    deleteTaskWithFile(id: string): TaskDeleteResult {
+        return this.taskService.deleteTaskWithFile(id);
+    }
+
+    filterTasks(filters: TaskFilters): TaskFilterResult {
+        return this.taskService.filterTasks(filters);
+    }
+
+    checkTaskDeadline(id: string): TaskDeadlineResult {
+        return this.taskService.checkTaskDeadline(id);
+    }
+
+    getOverdueTasks(): ApiResponse<TaskType[]> {
+        return this.handleResult(() => this.taskService.getOverdueTasks());
+    }
+
+    getTasksDueSoon(days: number = 7): ApiResponse<TaskType[]> {
+        return this.handleResult(() => this.taskService.getTasksDueSoon(days));
+    }
+
+    getTasksBySprint(sprintId: string): ApiResponse<TaskType[]> {
+        return this.handleResult(() => this.taskService.getTasksBySprint(sprintId));
+    }
+
+    getEnhancedStatistics(): ApiResponse<EnhancedTaskStatistics> {
+        return this.handleResult(() => this.taskService.getEnhancedStatistics());
+    }
+
+    initializeTasks(): { success: boolean; message?: string; error?: string } {
+        return this.taskService.initializeTasks();
+    }
 }

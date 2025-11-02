@@ -1,762 +1,608 @@
 import {
-  TaskType,
-  CreateTaskData,
-  UpdateTaskData,
-  TaskStatus,
-  Priority,
-  BugSeverity,
-  TaskInterface,
-  SubtaskInterface,
-  BugInterface,
-  StoryInterface,
-  EpicInterface,
-  TaskOperationResult,
-  TaskDetailsResult,
-  TaskDeleteResult,
-  TaskFilterResult,
-  TaskDeadlineResult,
-  TaskFilters
+    TaskType,
+    CreateTaskData,
+    UpdateTaskData,
+    TaskStatus,
+    Priority,
+    BugSeverity,
+    TaskOperationResult,
+    TaskDetailsResult,
+    TaskDeleteResult,
+    TaskFilterResult,
+    TaskDeadlineResult,
+    TaskFilters,
+    TaskStatistics,
+    EnhancedTaskStatistics,
+    messages
 } from './task.types';
 import * as fs from 'fs';
-import * as path from 'path';
-import {
-  messages, 
-  defaultStatus, 
-  defaultPriority,
-  taskTitleMinLength,
-  taskTitleMaxLength,
-  taskDescriptionMinLength,
-  taskDescriptionMaxLength
-} from './task.types';
+import {validateCreateTaskData, validateUpdateTaskData} from './task.validator';
+import {Task, Subtask, Bug, Story, Epic} from '../models';
 
 export class TaskService {
-  private tasks: TaskType[] = [];
-  private filePath: string;
+    private tasks: TaskType[] = [];
+    private filePath: string;
 
-  constructor(filePath?: string) {
-    this.filePath = filePath || 'tasks.json';
-    this.loadTasksFromFile();
-  }
-
-  private validateTaskData(data: CreateTaskData): void {
-    const validation = this.validateCreateTaskData(data);
-    if (!validation.success) {
-      throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
-    }
-  }
-
-  private validateUpdateData(data: UpdateTaskData): void {
-    const validation = this.validateUpdateTaskData(data);
-    if (!validation.success) {
-      throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
-    }
-  }
-
-  private validateCreateTaskData(data: any): { success: boolean; errors: string[] } {
-    const errors: string[] = [];
-    if (!data.title || typeof data.title !== 'string') {
-      errors.push('Title is required and must be a string');
-    } else if (data.title.trim().length === 0) {
-      errors.push('Title cannot be empty');
-    } else if (data.title.trim().length < taskTitleMinLength) {
-      errors.push(`Title must be at least ${taskTitleMinLength} characters long`);
-    } else if (data.title.trim().length > taskTitleMaxLength) {
-      errors.push(`Title must be no more than ${taskTitleMaxLength} characters long`);
-    }
-    if (!data.description || typeof data.description !== 'string') {
-      errors.push('Description is required and must be a string');
-    } else if (data.description.trim().length === 0) {
-      errors.push('Description cannot be empty');
-    } else if (data.description.trim().length < taskDescriptionMinLength) {
-      errors.push(`Description must be at least ${taskDescriptionMinLength} characters long`);
-    } else if (data.description.trim().length > taskDescriptionMaxLength) {
-      errors.push(`Description must be no more than ${taskDescriptionMaxLength} characters long`);
-    }
-    if (!data.priority || !['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(data.priority)) {
-      errors.push('Priority must be one of: LOW, MEDIUM, HIGH, CRITICAL');
-    }
-    if (!data.type || !['Task', 'Subtask', 'Bug', 'Story', 'Epic'].includes(data.type)) {
-      errors.push('Type must be one of: Task, Subtask, Bug, Story, Epic');
-    }
-    if (data.assignee !== undefined && data.assignee !== null) {
-      if (typeof data.assignee !== 'string') {
-        errors.push('Assignee must be a string');
-      } else if (data.assignee.trim().length === 0) {
-        errors.push('Assignee cannot be an empty string');
-      }
-    }
-    if (data.deadline !== undefined && data.deadline !== null) {
-      if (typeof data.deadline !== 'string') {
-        errors.push('Deadline must be a string');
-      } else if (data.deadline.trim().length === 0) {
-        errors.push('Deadline cannot be an empty string');
-      } else if (isNaN(Date.parse(data.deadline))) {
-        errors.push('Deadline must be a valid date string');
-      }
-    }
-    this.validateNumericField(data.estimatedHours, 'Estimated hours', errors);
-    this.validateNumericField(data.actualHours, 'Actual hours', errors);
-    this.validateNumericField(data.fixHours, 'Fix hours', errors);
-    this.validateNumericField(data.storyPoints, 'Story points', errors);
-    this.validateTypeSpecificFields(data, errors);
-    return {
-      success: errors.length === 0,
-      errors
-    };
-  }
-
-  private validateUpdateTaskData(data: any): { success: boolean; errors: string[] } {
-    const errors: string[] = [];
-    if (data.title !== undefined) {
-      if (typeof data.title !== 'string') {
-        errors.push('Title must be a string');
-      } else if (data.title.trim().length === 0) {
-        errors.push('Title cannot be empty');
-      } else if (data.title.trim().length < taskTitleMinLength) {
-        errors.push(`Title must be at least ${taskTitleMinLength} characters long`);
-      } else if (data.title.trim().length > taskTitleMaxLength) {
-        errors.push(`Title must be no more than ${taskTitleMaxLength} characters long`);
-      }
-    }
-    if (data.description !== undefined) {
-      if (typeof data.description !== 'string') {
-        errors.push('Description must be a string');
-      } else if (data.description.trim().length === 0) {
-        errors.push('Description cannot be empty');
-      } else if (data.description.trim().length < taskDescriptionMinLength) {
-        errors.push(`Description must be at least ${taskDescriptionMinLength} characters long`);
-      } else if (data.description.trim().length > taskDescriptionMaxLength) {
-        errors.push(`Description must be no more than ${taskDescriptionMaxLength} characters long`);
-      }
+    constructor(filePath?: string) {
+        this.filePath = filePath || 'tasks.json';
+        this.loadTasksFromFile();
     }
 
-    if (data.priority !== undefined) {
-      if (!['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(data.priority)) {
-        errors.push('Priority must be one of: LOW, MEDIUM, HIGH, CRITICAL');
-      }
-    }
-    if (data.status !== undefined) {
-      if (!['TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE', 'CANCELLED'].includes(data.status)) {
-        errors.push('Status must be one of: TODO, IN_PROGRESS, IN_REVIEW, DONE, CANCELLED');
-      }
-    }
-    if (data.assignee !== undefined && data.assignee !== null) {
-      if (typeof data.assignee !== 'string') {
-        errors.push('Assignee must be a string');
-      } else if (data.assignee.trim().length === 0) {
-        errors.push('Assignee cannot be an empty string');
-      }
-    }
-
-    if (data.deadline !== undefined && data.deadline !== null) {
-      if (typeof data.deadline !== 'string') {
-        errors.push('Deadline must be a string');
-      } else if (data.deadline.trim().length === 0) {
-        errors.push('Deadline cannot be an empty string');
-      } else if (isNaN(Date.parse(data.deadline))) {
-        errors.push('Deadline must be a valid date string');
-      }
-    }
-
-    this.validateNumericField(data.estimatedHours, 'Estimated hours', errors);
-    this.validateNumericField(data.actualHours, 'Actual hours', errors);
-    this.validateNumericField(data.fixHours, 'Fix hours', errors);
-    return {
-      success: errors.length === 0,
-      errors
-    };
-  }
-
-  private validateNumericField(value: any, fieldName: string, errors: string[]): void {
-    if (value !== undefined && value !== null) {
-      if (typeof value !== 'number') {
-        errors.push(`${fieldName} must be a number`);
-      } else if (value < 0) {
-        errors.push(`${fieldName} cannot be negative`);
-      } else if (!Number.isFinite(value)) {
-        errors.push(`${fieldName} must be a finite number`);
-      }
-    }
-  }
-
-  private validateTypeSpecificFields(data: any, errors: string[]): void {
-    switch (data.type) {
-      case 'Subtask':
-        if (!data.parentTaskId || typeof data.parentTaskId !== 'string') {
-          errors.push('Parent task ID is required for subtasks');
-        } else if (data.parentTaskId.trim().length === 0) {
-          errors.push('Parent task ID cannot be empty');
+    private validateTaskData(data: CreateTaskData): void {
+        const validation = validateCreateTaskData(data);
+        if (!validation.success) {
+            throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
         }
-        break;
+    }
 
-      case 'Bug':
-        if (!data.severity || !['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(data.severity)) {
-          errors.push('Severity is required for bugs and must be one of: LOW, MEDIUM, HIGH, CRITICAL');
+    private validateUpdateData(data: UpdateTaskData): void {
+        const validation = validateUpdateTaskData(data);
+        if (!validation.success) {
+            throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
         }
-        if (!data.stepsToReproduce || !Array.isArray(data.stepsToReproduce)) {
-          errors.push('Steps to reproduce is required for bugs and must be an array');
-        } else if (data.stepsToReproduce.length === 0) {
-          errors.push('Steps to reproduce cannot be empty for bugs');
-        } else {
-          data.stepsToReproduce.forEach((step: any, index: number) => {
-            if (typeof step !== 'string' || step.trim().length === 0) {
-              errors.push(`Step ${index + 1} in steps to reproduce must be a non-empty string`);
+    }
+
+    private createTaskInstance(
+        type: string,
+        id: string,
+        title: string,
+        description: string,
+        status: TaskStatus,
+        priority: Priority,
+        createdAt: Date,
+        updatedAt: Date,
+        assignee: string | undefined,
+        deadline: string | undefined,
+        taskData: Record<string, unknown>
+    ): TaskType {
+        switch (type) {
+            case 'Task':
+                return new Task(
+                    id,
+                    title,
+                    description,
+                    status,
+                    priority,
+                    createdAt,
+                    updatedAt,
+                    assignee,
+                    deadline,
+                    taskData.estimatedHours as number | undefined,
+                    taskData.actualHours as number | undefined
+                );
+            case 'Subtask':
+                return new Subtask(
+                    id,
+                    title,
+                    description,
+                    status,
+                    priority,
+                    createdAt,
+                    updatedAt,
+                    taskData.parentTaskId as string,
+                    assignee,
+                    deadline,
+                    taskData.estimatedHours as number | undefined,
+                    taskData.actualHours as number | undefined
+                );
+            case 'Bug':
+                return new Bug(
+                    id,
+                    title,
+                    description,
+                    status,
+                    priority,
+                    createdAt,
+                    updatedAt,
+                    taskData.severity as BugSeverity,
+                    taskData.stepsToReproduce as string[],
+                    taskData.environment as string,
+                    assignee,
+                    deadline,
+                    taskData.fixHours as number | undefined
+                );
+            case 'Story':
+                return new Story(
+                    id,
+                    title,
+                    description,
+                    status,
+                    priority,
+                    createdAt,
+                    updatedAt,
+                    taskData.acceptanceCriteria as string[],
+                    taskData.storyPoints as number,
+                    assignee,
+                    deadline,
+                    taskData.sprintId as string | undefined
+                );
+            case 'Epic':
+                return new Epic(
+                    id,
+                    title,
+                    description,
+                    status,
+                    priority,
+                    createdAt,
+                    updatedAt,
+                    (taskData.stories as string[]) || [],
+                    assignee,
+                    deadline,
+                    taskData.targetDate ? new Date(taskData.targetDate as string) : undefined
+                );
+            default:
+                throw new Error(`Invalid task type: ${type}`);
+        }
+    }
+
+    private generateId(): string {
+        return `task_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    }
+
+    createTask(data: CreateTaskData): TaskType {
+        this.validateTaskData(data);
+
+        const id = this.generateId();
+        const title = data.title.trim();
+        const description = data.description.trim();
+        const status = TaskStatus.TODO;
+        const priority = data.priority;
+        const createdAt = new Date();
+        const updatedAt = new Date();
+        const assignee = data.assignee;
+        const deadline = data.deadline;
+
+        if (data.type === 'Subtask') {
+            if (!data.parentTaskId) {
+                throw new Error('Parent task ID is required for subtasks');
             }
-          });
-        }
-        if (!data.environment || typeof data.environment !== 'string') {
-          errors.push('Environment is required for bugs and must be a string');
-        } else if (data.environment.trim().length === 0) {
-          errors.push('Environment cannot be empty for bugs');
-        }
-        break;
-
-      case 'Story':
-        if (!data.acceptanceCriteria || !Array.isArray(data.acceptanceCriteria)) {
-          errors.push('Acceptance criteria is required for stories and must be an array');
-        } else if (data.acceptanceCriteria.length === 0) {
-          errors.push('Acceptance criteria cannot be empty for stories');
-        } else {
-          data.acceptanceCriteria.forEach((criteria: any, index: number) => {
-            if (typeof criteria !== 'string' || criteria.trim().length === 0) {
-              errors.push(`Acceptance criteria ${index + 1} must be a non-empty string`);
+            if (!this.getTaskById(data.parentTaskId)) {
+                throw new Error('Parent task not found');
             }
-          });
         }
-        if (data.storyPoints === undefined || data.storyPoints === null) {
-          errors.push('Story points is required for stories');
-        } else if (typeof data.storyPoints !== 'number' || data.storyPoints < 0) {
-          errors.push('Story points must be a non-negative number');
-        }
-        break;
 
-      case 'Epic':
-        if (data.stories !== undefined && data.stories !== null) {
-          if (!Array.isArray(data.stories)) {
-            errors.push('Stories must be an array');
-          } else {
-            data.stories.forEach((story: any, index: number) => {
-              if (typeof story !== 'string' || story.trim().length === 0) {
-                errors.push(`Story ${index + 1} must be a non-empty string`);
-              }
+        const task = this.createTaskInstance(
+            data.type,
+            id,
+            title,
+            description,
+            status,
+            priority,
+            createdAt,
+            updatedAt,
+            assignee,
+            deadline,
+            data as unknown as Record<string, unknown>
+        );
+
+        this.tasks.push(task);
+        return task;
+    }
+
+    getAllTasks(): TaskType[] {
+        return [...this.tasks];
+    }
+
+    getTaskById(id: string): TaskType | undefined {
+        return this.tasks.find(task => task.id === id);
+    }
+
+    getTasksByStatus(status: TaskStatus): TaskType[] {
+        return this.tasks.filter(task => task.status === status);
+    }
+
+    getTasksByPriority(priority: Priority): TaskType[] {
+        return this.tasks.filter(task => task.priority === priority);
+    }
+
+    getTasksByAssignee(assignee: string): TaskType[] {
+        return this.tasks.filter(task => task.assignee === assignee);
+    }
+
+    getSubtasksByParentId(parentId: string): Subtask[] {
+        return this.tasks.filter(task =>
+            task.type === 'Subtask' && (task as Subtask).parentTaskId === parentId
+        ) as Subtask[];
+    }
+
+    getStoriesBySprintId(sprintId: string): Story[] {
+        return this.tasks.filter(task =>
+            task.type === 'Story' && (task as Story).sprintId === sprintId
+        ) as Story[];
+    }
+
+    updateTask(id: string, data: UpdateTaskData): TaskType {
+        const taskIndex = this.tasks.findIndex(task => task.id === id);
+        if (taskIndex === -1) {
+            throw new Error('Task not found');
+        }
+
+        this.validateUpdateData(data);
+        const existingTask = this.tasks[taskIndex];
+
+        if (data.title !== undefined) existingTask.title = data.title;
+        if (data.description !== undefined) existingTask.description = data.description;
+        if (data.status !== undefined) existingTask.status = data.status;
+        if (data.priority !== undefined) existingTask.priority = data.priority;
+        if (data.assignee !== undefined) existingTask.assignee = data.assignee;
+        if (data.deadline !== undefined) existingTask.deadline = data.deadline;
+        existingTask.updatedAt = new Date();
+
+        if (existingTask.type === 'Task' || existingTask.type === 'Subtask') {
+            const task = existingTask as Task | Subtask;
+            if (data.estimatedHours !== undefined) task.estimatedHours = data.estimatedHours;
+            if (data.actualHours !== undefined) task.actualHours = data.actualHours;
+        }
+        if (existingTask.type === 'Bug') {
+            const bug = existingTask as Bug;
+            if (data.fixHours !== undefined) bug.fixHours = data.fixHours;
+        }
+        if (existingTask.type === 'Story') {
+            const story = existingTask as Story;
+            if (data.sprintId !== undefined) story.sprintId = data.sprintId;
+        }
+        if (existingTask.type === 'Epic') {
+            const epic = existingTask as Epic;
+            if (data.targetDate !== undefined) epic.targetDate = data.targetDate;
+        }
+
+        return existingTask;
+    }
+
+    deleteTask(id: string): boolean {
+        const taskIndex = this.tasks.findIndex(task => task.id === id);
+        if (taskIndex === -1) {
+            return false;
+        }
+
+        const subtasks = this.getSubtasksByParentId(id);
+        if (subtasks.length > 0) {
+            throw new Error('Cannot delete task with existing subtasks');
+        }
+
+        this.tasks.splice(taskIndex, 1);
+        return true;
+    }
+
+    changeTaskStatus(id: string, status: TaskStatus): TaskType {
+        return this.updateTask(id, {status});
+    }
+
+    getTaskStatistics(): TaskStatistics {
+        const total = this.tasks.length;
+        const byStatus = this.tasks.reduce((acc, task) => {
+            acc[task.status] = (acc[task.status] || 0) + 1;
+            return acc;
+        }, {} as Record<TaskStatus, number>);
+
+        const byPriority = this.tasks.reduce((acc, task) => {
+            acc[task.priority] = (acc[task.priority] || 0) + 1;
+            return acc;
+        }, {} as Record<Priority, number>);
+
+        const byType = this.tasks.reduce((acc, task) => {
+            acc[task.type] = (acc[task.type] || 0) + 1;
+            return acc;
+        }, {} as Record<string, number>);
+
+        return {
+            total,
+            byStatus,
+            byPriority,
+            byType
+        };
+    }
+
+    searchTasks(query: string): TaskType[] {
+        const lowercaseQuery = query.toLowerCase();
+        return this.tasks.filter(task =>
+            task.title.toLowerCase().includes(lowercaseQuery) ||
+            task.description.toLowerCase().includes(lowercaseQuery)
+        );
+    }
+
+    clearAllTasks(): void {
+        this.tasks = [];
+    }
+
+    private loadTasksFromFile(): void {
+        try {
+            if (!fs.existsSync(this.filePath)) {
+                return;
+            }
+
+            const fileContent = fs.readFileSync(this.filePath, 'utf-8');
+            const tasksData: unknown = JSON.parse(fileContent);
+            if (!Array.isArray(tasksData)) {
+                return;
+            }
+
+            this.tasks = tasksData.map((taskData: unknown) => {
+                if (typeof taskData !== 'object' || taskData === null) {
+                    throw new Error('Invalid task data');
+                }
+                const task = taskData as Record<string, unknown>;
+                const id = task.id as string;
+                const title = task.title as string;
+                const description = task.description as string;
+                const status = task.status as TaskStatus;
+                const priority = task.priority as Priority;
+                const createdAt = new Date(task.createdAt as string);
+                const updatedAt = new Date(task.updatedAt as string);
+                const assignee = task.assignee as string | undefined;
+                const deadline = task.deadline as string | undefined;
+                const type = task.type as string;
+
+                return this.createTaskInstance(
+                    type,
+                    id,
+                    title,
+                    description,
+                    status,
+                    priority,
+                    createdAt,
+                    updatedAt,
+                    assignee,
+                    deadline,
+                    task
+                );
             });
-          }
+        } catch (error) {
+            console.error('Error loading tasks from file:', error);
         }
-        break;
     }
-  }
 
-  private generateId(): string {
-    return `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  createTask(data: CreateTaskData): TaskType {
-    this.validateTaskData(data);
-
-    const baseTask = {
-      id: this.generateId(),
-      title: data.title.trim(),
-      description: data.description.trim(),
-      status: TaskStatus.TODO,
-      priority: data.priority,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      assignee: data.assignee,
-      ...(data.deadline && { deadline: data.deadline })
-    };
-
-    let task: TaskType;
-
-    switch (data.type) {
-      case 'Task':
-        task = {
-          ...baseTask,
-          type: 'Task',
-          estimatedHours: data.estimatedHours,
-          actualHours: data.actualHours
-        } as TaskInterface;
-        break;
-
-      case 'Subtask':
-        if (!data.parentTaskId) {
-          throw new Error('Parent task ID is required for subtasks');
+    private saveTasksToFile(): { success: boolean; error?: string } {
+        try {
+            const tasksForJson = this.tasks.map(task => ({
+                ...task,
+                createdAt: task.createdAt.toISOString(),
+                updatedAt: task.updatedAt.toISOString(),
+                ...(task.type === 'Epic' && 'targetDate' in task && task.targetDate && {
+                    targetDate: (task.targetDate as Date).toISOString()
+                })
+            }));
+            const jsonContent = JSON.stringify(tasksForJson, null, 2);
+            fs.writeFileSync(this.filePath, jsonContent, 'utf-8');
+            return {success: true};
+        } catch (error) {
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error saving tasks'
+            };
         }
-        if (!this.getTaskById(data.parentTaskId)) {
-          throw new Error('Parent task not found');
+    }
+
+    getTaskDetails(id: string): TaskDetailsResult {
+        const task = this.getTaskById(id);
+
+        if (!task) {
+            return {
+                success: false,
+                error: messages.taskNotFound(id)
+            };
         }
-        task = {
-          ...baseTask,
-          type: 'Subtask',
-          parentTaskId: data.parentTaskId,
-          estimatedHours: data.estimatedHours,
-          actualHours: data.actualHours
-        } as SubtaskInterface;
-        break;
 
-      case 'Bug':
-        if (!data.severity) {
-          throw new Error('Severity is required for bugs');
+        return {
+            success: true,
+            task
+        };
+    }
+
+    private handleTaskOperationWithSave<T>(operation: () => T): TaskOperationResult {
+        try {
+            const task = operation();
+            const saveResult = this.saveTasksToFile();
+            if (saveResult.success) {
+                return {
+                    success: true,
+                    task: task as TaskType
+                };
+            } else {
+                return {
+                    success: false,
+                    errors: [saveResult.error || 'Failed to save task']
+                };
+            }
+        } catch (error) {
+            return {
+                success: false,
+                errors: [error instanceof Error ? error.message : messages.unknownError]
+            };
         }
-        if (!data.stepsToReproduce || data.stepsToReproduce.length === 0) {
-          throw new Error('Steps to reproduce are required for bugs');
+    }
+
+    createTaskWithValidation(data: CreateTaskData): TaskOperationResult {
+        const existingTask = this.getTaskById(data.id || this.generateId());
+        if (existingTask) {
+            return {
+                success: false,
+                errors: [messages.taskAlreadyExists(data.id || 'unknown')]
+            };
         }
-        if (!data.environment || data.environment.trim().length === 0) {
-          throw new Error('Environment is required for bugs');
+        return this.handleTaskOperationWithSave(() => this.createTask(data));
+    }
+
+    updateTaskWithValidation(id: string, updates: UpdateTaskData): TaskOperationResult {
+        const existingTask = this.getTaskById(id);
+        if (!existingTask) {
+            return {
+                success: false,
+                errors: [messages.taskNotFound(id)]
+            };
         }
-        task = {
-          ...baseTask,
-          type: 'Bug',
-          severity: data.severity,
-          stepsToReproduce: data.stepsToReproduce,
-          environment: data.environment.trim(),
-          fixHours: data.fixHours
-        } as BugInterface;
-        break;
+        return this.handleTaskOperationWithSave(() => this.updateTask(id, updates));
+    }
 
-      case 'Story':
-        if (!data.acceptanceCriteria || data.acceptanceCriteria.length === 0) {
-          throw new Error('Acceptance criteria are required for stories');
+    deleteTaskWithFile(id: string): TaskDeleteResult {
+        const existingTask = this.getTaskById(id);
+
+        if (!existingTask) {
+            return {
+                success: false,
+                error: messages.taskNotFound(id)
+            };
         }
-        if (data.storyPoints === undefined || data.storyPoints < 0) {
-          throw new Error('Story points are required for stories');
+
+        try {
+            this.tasks = this.tasks.filter(task => task.id !== id);
+            const saveResult = this.saveTasksToFile();
+            if (saveResult.success) {
+                return {
+                    success: true,
+                    message: messages.taskDeletedSuccess(existingTask.title, id)
+                };
+            } else {
+                return {
+                    success: false,
+                    error: saveResult.error
+                };
+            }
+        } catch (error) {
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : messages.unknownError
+            };
         }
-        task = {
-          ...baseTask,
-          type: 'Story',
-          acceptanceCriteria: data.acceptanceCriteria,
-          storyPoints: data.storyPoints,
-          sprintId: data.sprintId
-        } as StoryInterface;
-        break;
-
-      case 'Epic':
-        task = {
-          ...baseTask,
-          type: 'Epic',
-          stories: data.stories || [],
-          targetDate: data.targetDate
-        } as EpicInterface;
-        break;
-
-      default:
-        throw new Error('Invalid task type');
     }
 
-    this.tasks.push(task);
-    return task;
-  }
+    filterTasks(filters: TaskFilters): TaskFilterResult {
+        const filteredTasks = this.tasks.filter(task => {
+            if (filters.status && task.status !== filters.status) return false;
+            if (filters.priority && task.priority !== filters.priority) return false;
+            if (filters.assignee && task.assignee !== filters.assignee) return false;
+            if (filters.type && task.type !== filters.type) return false;
+            if (filters.createdAfter && new Date(task.createdAt) < new Date(filters.createdAfter)) return false;
+            if (filters.createdBefore && new Date(task.createdAt) > new Date(filters.createdBefore)) return false;
+            const taskDeadline = this.getTaskDeadline(task);
+            if (filters.deadlineAfter && (!taskDeadline || new Date(taskDeadline) < new Date(filters.deadlineAfter))) return false;
+            if (filters.deadlineBefore && (!taskDeadline || new Date(taskDeadline) > new Date(filters.deadlineBefore))) return false;
 
-  getAllTasks(): TaskType[] {
-    return [...this.tasks];
-  }
+            return true;
+        });
 
-  getTaskById(id: string): TaskType | undefined {
-    return this.tasks.find(task => task.id === id);
-  }
-
-  getTasksByStatus(status: TaskStatus): TaskType[] {
-    return this.tasks.filter(task => task.status === status);
-  }
-
-  getTasksByPriority(priority: Priority): TaskType[] {
-    return this.tasks.filter(task => task.priority === priority);
-  }
-
-  getTasksByAssignee(assignee: string): TaskType[] {
-    return this.tasks.filter(task => task.assignee === assignee);
-  }
-
-  getSubtasksByParentId(parentId: string): SubtaskInterface[] {
-    return this.tasks.filter(task => 
-      task.type === 'Subtask' && (task as SubtaskInterface).parentTaskId === parentId
-    ) as SubtaskInterface[];
-  }
-
-  getStoriesBySprintId(sprintId: string): StoryInterface[] {
-    return this.tasks.filter(task => 
-      task.type === 'Story' && (task as StoryInterface).sprintId === sprintId
-    ) as StoryInterface[];
-  }
-
-  updateTask(id: string, data: UpdateTaskData): TaskType {
-    const taskIndex = this.tasks.findIndex(task => task.id === id);
-    if (taskIndex === -1) {
-      throw new Error('Task not found');
-    }
-
-    this.validateUpdateData(data);
-    const existingTask = this.tasks[taskIndex];
-    const updatedTask: TaskType = {
-      ...existingTask,
-      ...data,
-      updatedAt: new Date()
-    };
-
-    this.tasks[taskIndex] = updatedTask;
-    return updatedTask;
-  }
-
-  deleteTask(id: string): boolean {
-    const taskIndex = this.tasks.findIndex(task => task.id === id);
-    if (taskIndex === -1) {
-      return false;
-    }
-
-    const subtasks = this.getSubtasksByParentId(id);
-    if (subtasks.length > 0) {
-      throw new Error('Cannot delete task with existing subtasks');
-    }
-
-    this.tasks.splice(taskIndex, 1);
-    return true;
-  }
-
-  changeTaskStatus(id: string, status: TaskStatus): TaskType {
-    return this.updateTask(id, { status });
-  }
-
-  getTaskStatistics() {
-    const total = this.tasks.length;
-    const byStatus = this.tasks.reduce((acc, task) => {
-      acc[task.status] = (acc[task.status] || 0) + 1;
-      return acc;
-    }, {} as Record<TaskStatus, number>);
-
-    const byPriority = this.tasks.reduce((acc, task) => {
-      acc[task.priority] = (acc[task.priority] || 0) + 1;
-      return acc;
-    }, {} as Record<Priority, number>);
-
-    const byType = this.tasks.reduce((acc, task) => {
-      acc[task.type] = (acc[task.type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    return {
-      total,
-      byStatus,
-      byPriority,
-      byType
-    };
-  }
-
-  searchTasks(query: string): TaskType[] {
-    const lowercaseQuery = query.toLowerCase();
-    return this.tasks.filter(task => 
-      task.title.toLowerCase().includes(lowercaseQuery) ||
-      task.description.toLowerCase().includes(lowercaseQuery)
-    );
-  }
-
-  clearAllTasks(): void {
-    this.tasks = [];
-  }
-
-  private loadTasksFromFile(): void {
-    try {
-      if (!fs.existsSync(this.filePath)) {
-        return;
-      }
-
-      const fileContent = fs.readFileSync(this.filePath, 'utf-8');
-      const tasksData = JSON.parse(fileContent);
-      const tasksWithDates = tasksData.map((task: any) => ({
-        ...task,
-        createdAt: new Date(task.createdAt),
-        updatedAt: new Date(task.updatedAt),
-        ...(task.targetDate && { targetDate: new Date(task.targetDate) })
-      }));
-      if (Array.isArray(tasksWithDates)) {
-        this.tasks = tasksWithDates as TaskType[];
-      }
-    } catch (error) {
-      console.error('Error loading tasks from file:', error);
-    }
-  }
-
-  private saveTasksToFile(): { success: boolean; error?: string } {
-    try {
-      const tasksForJson = this.tasks.map(task => ({
-        ...task,
-        createdAt: task.createdAt.toISOString(),
-        updatedAt: task.updatedAt.toISOString(),
-        ...(task.type === 'Epic' && (task as any).targetDate && { 
-          targetDate: (task as any).targetDate.toISOString() 
-        })
-      }));
-      const jsonContent = JSON.stringify(tasksForJson, null, 2);
-      fs.writeFileSync(this.filePath, jsonContent, 'utf-8');
-      return { success: true };
-    } catch (error) {
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error saving tasks' 
-      };
-    }
-  }
-
-  getTaskDetails(id: string): TaskDetailsResult {
-    const task = this.getTaskById(id);
-    
-    if (!task) {
-      return {
-        success: false,
-        error: messages.taskNotFound(id)
-      };
-    }
-
-    return {
-      success: true,
-      task
-    };
-  }
-
-  createTaskWithValidation(data: CreateTaskData): TaskOperationResult {
-    try {
-      const existingTask = this.getTaskById(data.id || this.generateId());
-      if (existingTask) {
         return {
-          success: false,
-          errors: [messages.taskAlreadyExists(data.id || 'unknown')]
+            success: true,
+            tasks: filteredTasks,
+            count: filteredTasks.length
         };
-      }
+    }
 
-      const task = this.createTask(data);
-      const saveResult = this.saveTasksToFile();
-      if (saveResult.success) {
+    checkTaskDeadline(id: string): TaskDeadlineResult {
+        const task = this.tasks.find(task => task.id === id);
+
+        if (!task) {
+            return {
+                success: false,
+                error: messages.taskNotFound(id)
+            };
+        }
+
+        const deadline = this.getTaskDeadline(task);
+        if (!deadline) {
+            return {
+                success: true,
+                task,
+                isCompletedOnTime: undefined,
+                daysUntilDeadline: undefined,
+                isOverdue: false
+            };
+        }
+
+        const now: Date = new Date();
+        const deadlineDate: Date = new Date(deadline);
+        const daysUntilDeadline: number = Math.ceil((deadlineDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        const isOverdue: boolean = now > deadlineDate;
+        const isCompletedOnTime: boolean = task.status === 'DONE' && !isOverdue;
+
         return {
-          success: true,
-          task: task
+            success: true,
+            task,
+            isCompletedOnTime,
+            daysUntilDeadline,
+            isOverdue
         };
-      } else {
+    }
+
+    getOverdueTasks(): TaskType[] {
+        return this.tasks.filter(task => {
+            const deadline = this.getTaskDeadline(task);
+            if (!deadline) return false;
+
+            const now = new Date();
+            const deadlineDate = new Date(deadline);
+            return now > deadlineDate && task.status !== 'DONE';
+        });
+    }
+
+    getTasksDueSoon(days: number = 7): TaskType[] {
+        const now = new Date();
+        const futureDate = new Date(now.getTime() + (days * 24 * 60 * 60 * 1000));
+
+        return this.tasks.filter(task => {
+            const deadline = this.getTaskDeadline(task);
+            if (!deadline) return false;
+
+            const deadlineDate = new Date(deadline);
+            return deadlineDate >= now && deadlineDate <= futureDate && task.status !== 'DONE';
+        });
+    }
+
+    getTasksBySprint(sprintId: string): TaskType[] {
+        return this.tasks.filter(task => {
+            if (task.type === 'Story') {
+                return 'sprintId' in task && (task as Story).sprintId === sprintId;
+            }
+            return false;
+        });
+    }
+
+    getEnhancedStatistics(): EnhancedTaskStatistics {
+        const baseStats = this.getTaskStatistics();
+
+        const byAssignee = this.tasks.reduce((acc, task) => {
+            const assignee = task.assignee || 'Unassigned';
+            acc[assignee] = (acc[assignee] || 0) + 1;
+            return acc;
+        }, {} as Record<string, number>);
+
+        const overdue = this.getOverdueTasks().length;
+        const dueSoon = this.getTasksDueSoon().length;
+
         return {
-          success: false,
-          errors: [saveResult.error || 'Failed to save task']
+            total: baseStats.total,
+            byStatus: baseStats.byStatus as Record<string, number>,
+            byPriority: baseStats.byPriority as Record<string, number>,
+            byType: baseStats.byType,
+            byAssignee,
+            overdue,
+            dueSoon
         };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        errors: [error instanceof Error ? error.message : messages.unknownError]
-      };
-    }
-  }
-
-  updateTaskWithValidation(id: string, updates: UpdateTaskData): TaskOperationResult {
-    try {
-      const existingTask = this.getTaskById(id);
-      
-      if (!existingTask) {
-        return {
-          success: false,
-          errors: [messages.taskNotFound(id)]
-        };
-      }
-
-      const updatedTask = this.updateTask(id, updates);
-      const saveResult = this.saveTasksToFile();
-      if (saveResult.success) {
-        return {
-          success: true,
-          task: updatedTask
-        };
-      } else {
-        return {
-          success: false,
-          errors: [saveResult.error || 'Failed to save task']
-        };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        errors: [error instanceof Error ? error.message : messages.unknownError]
-      };
-    }
-  }
-
-  deleteTaskWithFile(id: string): TaskDeleteResult {
-    const existingTask = this.getTaskById(id);
-    
-    if (!existingTask) {
-      return {
-        success: false,
-        error: messages.taskNotFound(id)
-      };
     }
 
-    try {
-      this.tasks = this.tasks.filter(task => task.id !== id);
-      const saveResult = this.saveTasksToFile();
-      if (saveResult.success) {
-        return {
-          success: true,
-          message: messages.taskDeletedSuccess(existingTask.title, id)
-        };
-      } else {
-        return {
-          success: false,
-          error: saveResult.error
-        };
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : messages.unknownError
-      };
-    }
-  }
-
-  filterTasks(filters: TaskFilters): TaskFilterResult {
-    const filteredTasks = this.tasks.filter(task => {
-      if (filters.status && task.status !== filters.status) return false;
-      if (filters.priority && task.priority !== filters.priority) return false;
-      if (filters.assignee && task.assignee !== filters.assignee) return false;
-      if (filters.type && task.type !== filters.type) return false;
-      if (filters.createdAfter && new Date(task.createdAt) < new Date(filters.createdAfter)) return false;
-      if (filters.createdBefore && new Date(task.createdAt) > new Date(filters.createdBefore)) return false;
-      const taskDeadline = this.getTaskDeadline(task);
-      if (filters.deadlineAfter && (!taskDeadline || new Date(taskDeadline) < new Date(filters.deadlineAfter))) return false;
-      if (filters.deadlineBefore && (!taskDeadline || new Date(taskDeadline) > new Date(filters.deadlineBefore))) return false;
-      
-      return true;
-    });
-
-    return {
-      success: true,
-      tasks: filteredTasks,
-      count: filteredTasks.length
-    };
-  }
-
-  checkTaskDeadline(id: string): TaskDeadlineResult {
-    const task = this.tasks.find(task => task.id === id);
-    
-    if (!task) {
-      return {
-        success: false,
-        error: messages.taskNotFound(id)
-      };
+    private getTaskDeadline(task: TaskType): string | undefined {
+        if ('deadline' in task && task.deadline) {
+            return task.deadline;
+        }
+        if ('targetDate' in task && task.targetDate) {
+            return task.targetDate.toISOString();
+        }
+        return undefined;
     }
 
-    const deadline = this.getTaskDeadline(task);
-    if (!deadline) {
-      return {
-        success: true,
-        task,
-        isCompletedOnTime: undefined,
-        daysUntilDeadline: undefined,
-        isOverdue: false
-      };
+    initializeTasks(): { success: boolean; message: string; error?: string } {
+        try {
+            this.loadTasksFromFile();
+            return {
+                success: true,
+                message: `Successfully loaded ${this.tasks.length} tasks`
+            };
+        } catch (error) {
+            return {
+                success: false,
+                message: 'Failed to initialize tasks',
+                error: error instanceof Error ? error.message : messages.unknownError
+            };
+        }
     }
-
-    const now: Date = new Date();
-    const deadlineDate: Date = new Date(deadline);
-    const daysUntilDeadline: number = Math.ceil((deadlineDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    const isOverdue: boolean = now > deadlineDate;
-    const isCompletedOnTime: boolean = task.status === 'DONE' && !isOverdue;
-
-    return {
-      success: true,
-      task,
-      isCompletedOnTime,
-      daysUntilDeadline,
-      isOverdue
-    };
-  }
-
-  getOverdueTasks(): TaskType[] {
-    return this.tasks.filter(task => {
-      const deadline = this.getTaskDeadline(task);
-      if (!deadline) return false;
-      
-      const now = new Date();
-      const deadlineDate = new Date(deadline);
-      return now > deadlineDate && task.status !== 'DONE';
-    });
-  }
-
-  getTasksDueSoon(days: number = 7): TaskType[] {
-    const now = new Date();
-    const futureDate = new Date(now.getTime() + (days * 24 * 60 * 60 * 1000));
-    
-    return this.tasks.filter(task => {
-      const deadline = this.getTaskDeadline(task);
-      if (!deadline) return false;
-      
-      const deadlineDate = new Date(deadline);
-      return deadlineDate >= now && deadlineDate <= futureDate && task.status !== 'DONE';
-    });
-  }
-
-  getTasksBySprint(sprintId: string): TaskType[] {
-    return this.tasks.filter(task => {
-      if (task.type === 'Story') {
-        return (task as any).sprintId === sprintId;
-      }
-      return false;
-    });
-  }
-
-  getEnhancedStatistics() {
-    const total = this.tasks.length;
-    const byStatus = this.tasks.reduce((acc, task) => {
-      acc[task.status] = (acc[task.status] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const byPriority = this.tasks.reduce((acc, task) => {
-      acc[task.priority] = (acc[task.priority] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const byType = this.tasks.reduce((acc, task) => {
-      acc[task.type] = (acc[task.type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const byAssignee = this.tasks.reduce((acc, task) => {
-      const assignee = task.assignee || 'Unassigned';
-      acc[assignee] = (acc[assignee] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const overdue = this.getOverdueTasks().length;
-    const dueSoon = this.getTasksDueSoon().length;
-
-    return {
-      total,
-      byStatus,
-      byPriority,
-      byType,
-      byAssignee,
-      overdue,
-      dueSoon
-    };
-  }
-
-  private getTaskDeadline(task: TaskType): string | undefined {
-    if ('deadline' in task && task.deadline) {
-      return task.deadline;
-    }
-    if ('targetDate' in task && task.targetDate) {
-      return task.targetDate.toISOString();
-    }
-    return undefined;
-  }
-
-  initializeTasks(): { success: boolean; message: string; error?: string } {
-    try {
-      this.loadTasksFromFile();
-      return {
-        success: true,
-        message: `Successfully loaded ${this.tasks.length} tasks`
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: 'Failed to initialize tasks',
-        error: error instanceof Error ? error.message : messages.unknownError
-      };
-    }
-  }
 }
