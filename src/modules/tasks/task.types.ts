@@ -153,16 +153,12 @@ export interface ApiResponse<T> {
 
 export interface TaskStatistics {
     total: number;
-    byStatus: Record<TaskStatus, number>;
-    byPriority: Record<Priority, number>;
-    byType: Record<string, number>;
-}
-
-export interface EnhancedTaskStatistics {
-    total: number;
     byStatus: Record<string, number>;
     byPriority: Record<string, number>;
     byType: Record<string, number>;
+}
+
+export interface EnhancedTaskStatistics extends TaskStatistics {
     byAssignee: Record<string, number>;
     overdue: number;
     dueSoon: number;

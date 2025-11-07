@@ -1,27 +1,19 @@
-import {TaskStatus, Priority} from '../tasks/task.types';
-import {BaseTaskClass} from './base-task.model';
+import {BaseTaskClass, BaseTaskProps} from './base-task.model';
+
+export interface EpicProps extends BaseTaskProps {
+    stories: string[];
+    targetDate?: Date;
+}
 
 export class Epic extends BaseTaskClass {
     public readonly type: 'Epic' = 'Epic';
     public stories: string[];
     public targetDate?: Date;
 
-    constructor(
-        id: string,
-        title: string,
-        description: string,
-        status: TaskStatus,
-        priority: Priority,
-        createdAt: Date,
-        updatedAt: Date,
-        stories: string[],
-        assignee?: string,
-        deadline?: string,
-        targetDate?: Date
-    ) {
-        super(id, title, description, status, priority, createdAt, updatedAt, assignee, deadline);
-        this.stories = stories;
-        this.targetDate = targetDate;
+    constructor(props: EpicProps) {
+        super(props);
+        this.stories = props.stories;
+        this.targetDate = props.targetDate;
     }
 
     getTaskInfo(): string {

@@ -1,5 +1,12 @@
-import {TaskStatus, Priority, BugSeverity} from '../tasks/task.types';
-import {BaseTaskClass} from './base-task.model';
+import {BugSeverity} from '../tasks/task.types';
+import {BaseTaskClass, BaseTaskProps} from './base-task.model';
+
+export interface BugProps extends BaseTaskProps {
+    severity: BugSeverity;
+    stepsToReproduce: string[];
+    environment: string;
+    fixHours?: number;
+}
 
 export class Bug extends BaseTaskClass {
     public readonly type: 'Bug' = 'Bug';
@@ -8,26 +15,12 @@ export class Bug extends BaseTaskClass {
     public environment: string;
     public fixHours?: number;
 
-    constructor(
-        id: string,
-        title: string,
-        description: string,
-        status: TaskStatus,
-        priority: Priority,
-        createdAt: Date,
-        updatedAt: Date,
-        severity: BugSeverity,
-        stepsToReproduce: string[],
-        environment: string,
-        assignee?: string,
-        deadline?: string,
-        fixHours?: number
-    ) {
-        super(id, title, description, status, priority, createdAt, updatedAt, assignee, deadline);
-        this.severity = severity;
-        this.stepsToReproduce = stepsToReproduce;
-        this.environment = environment;
-        this.fixHours = fixHours;
+    constructor(props: BugProps) {
+        super(props);
+        this.severity = props.severity;
+        this.stepsToReproduce = props.stepsToReproduce;
+        this.environment = props.environment;
+        this.fixHours = props.fixHours;
     }
 
     getTaskInfo(): string {

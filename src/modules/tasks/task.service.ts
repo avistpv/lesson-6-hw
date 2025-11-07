@@ -4,7 +4,6 @@ import {
     UpdateTaskData,
     TaskStatus,
     Priority,
-    BugSeverity,
     TaskOperationResult,
     TaskDetailsResult,
     TaskDeleteResult,
@@ -18,6 +17,13 @@ import {
 import * as fs from 'fs';
 import {validateCreateTaskData, validateUpdateTaskData} from './task.validator';
 import {Task, Subtask, Bug, Story, Epic} from '../models';
+import {BaseTaskProps} from '../models/base-task.model';
+
+type TaskCreationPayload = CreateTaskData & {
+    status?: TaskStatus;
+    createdAt?: Date;
+    updatedAt?: Date;
+};
 
 export class TaskService {
     private tasks: TaskType[] = [];
@@ -42,115 +48,211 @@ export class TaskService {
         }
     }
 
-    private createTaskInstance(
-        type: string,
-        id: string,
-        title: string,
-        description: string,
-        status: TaskStatus,
-        priority: Priority,
-        createdAt: Date,
-        updatedAt: Date,
-        assignee: string | undefined,
-        deadline: string | undefined,
-        taskData: Record<string, unknown>
-    ): TaskType {
-        switch (type) {
+    private countTasksBy<K extends string>(selector: (task: TaskType) => K): Record<K, number> {
+        return this.tasks.reduce((acc, task) => {
+            const key = selector(task);
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+        }, {} as Record<K, number>);
+    }
+
+    private createTaskInstance(taskData: TaskCreationPayload): TaskType {
+        const baseProps: BaseTaskProps = {
+            id: taskData.id,
+            title: taskData.title,
+            description: taskData.description,
+            status: taskData.status,
+            priority: taskData.priority,
+            createdAt: taskData.createdAt,
+            updatedAt: taskData.updatedAt,
+            assignee: taskData.assignee,
+            deadline: taskData.deadline
+        };
+
+        switch (taskData.type) {
             case 'Task':
-                return new Task(
-                    id,
-                    title,
-                    description,
-                    status,
-                    priority,
-                    createdAt,
-                    updatedAt,
-                    assignee,
-                    deadline,
-                    taskData.estimatedHours as number | undefined,
-                    taskData.actualHours as number | undefined
-                );
+                return new Task({
+                    ...baseProps,
+                    estimatedHours: taskData.estimatedHours,
+                    actualHours: taskData.actualHours
+                });
             case 'Subtask':
-                return new Subtask(
-                    id,
-                    title,
-                    description,
-                    status,
-                    priority,
-                    createdAt,
-                    updatedAt,
-                    taskData.parentTaskId as string,
-                    assignee,
-                    deadline,
-                    taskData.estimatedHours as number | undefined,
-                    taskData.actualHours as number | undefined
-                );
+                if (!taskData.parentTaskId) {
+                    throw new Error('Parent task ID is required for subtasks');
+                }
+                return new Subtask({
+                    ...baseProps,
+                    parentTaskId: taskData.parentTaskId,
+                    estimatedHours: taskData.estimatedHours,
+                    actualHours: taskData.actualHours
+                });
             case 'Bug':
-                return new Bug(
-                    id,
-                    title,
-                    description,
-                    status,
-                    priority,
-                    createdAt,
-                    updatedAt,
-                    taskData.severity as BugSeverity,
-                    taskData.stepsToReproduce as string[],
-                    taskData.environment as string,
-                    assignee,
-                    deadline,
-                    taskData.fixHours as number | undefined
-                );
+                if (!taskData.severity) {
+                    throw new Error('Severity is required for bugs');
+                }
+                if (!taskData.stepsToReproduce || taskData.stepsToReproduce.length === 0) {
+                    throw new Error('Steps to reproduce are required for bugs');
+                }
+                if (!taskData.environment || taskData.environment.trim().length === 0) {
+                    throw new Error('Environment is required for bugs');
+                }
+                return new Bug({
+                    ...baseProps,
+                    severity: taskData.severity,
+                    stepsToReproduce: taskData.stepsToReproduce,
+                    environment: taskData.environment.trim(),
+                    fixHours: taskData.fixHours
+                });
             case 'Story':
-                return new Story(
-                    id,
-                    title,
-                    description,
-                    status,
-                    priority,
-                    createdAt,
-                    updatedAt,
-                    taskData.acceptanceCriteria as string[],
-                    taskData.storyPoints as number,
-                    assignee,
-                    deadline,
-                    taskData.sprintId as string | undefined
-                );
+                if (!taskData.acceptanceCriteria || taskData.acceptanceCriteria.length === 0) {
+                    throw new Error('Acceptance criteria are required for stories');
+                }
+                if (taskData.storyPoints === undefined || taskData.storyPoints < 0) {
+                    throw new Error('Story points are required for stories');
+                }
+                return new Story({
+                    ...baseProps,
+                    acceptanceCriteria: taskData.acceptanceCriteria,
+                    storyPoints: taskData.storyPoints,
+                    sprintId: taskData.sprintId
+                });
             case 'Epic':
-                return new Epic(
-                    id,
-                    title,
-                    description,
-                    status,
-                    priority,
-                    createdAt,
-                    updatedAt,
-                    (taskData.stories as string[]) || [],
-                    assignee,
-                    deadline,
-                    taskData.targetDate ? new Date(taskData.targetDate as string) : undefined
-                );
+                return new Epic({
+                    ...baseProps,
+                    stories: taskData.stories || [],
+                    targetDate: taskData.targetDate
+                });
             default:
-                throw new Error(`Invalid task type: ${type}`);
+                throw new Error(`Invalid task type: ${taskData.type}`);
         }
     }
 
-    private generateId(): string {
-        return `task_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    private normalizeTaskDataFromFile(task: Record<string, unknown>): TaskCreationPayload {
+        const typeValue = task.type;
+        if (typeof typeValue !== 'string') {
+            throw new Error('Task type must be a string');
+        }
+
+        const priorityValue = task.priority;
+        if (typeof priorityValue !== 'string') {
+            throw new Error('Task priority must be a string');
+        }
+
+        const parseDate = (value: unknown): Date | undefined => {
+            if (value instanceof Date) {
+                return value;
+            }
+            if (typeof value === 'string') {
+                const parsed = new Date(value);
+                if (!Number.isNaN(parsed.getTime())) {
+                    return parsed;
+                }
+            }
+            return undefined;
+        };
+
+        const pickStringArray = (value: unknown): string[] | undefined => {
+            if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
+                return value as string[];
+            }
+            return undefined;
+        };
+
+        const pickString = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
+        const pickNumber = (value: unknown): number | undefined => (typeof value === 'number' ? value : undefined);
+
+        const titleInput = pickString(task.title);
+        const descriptionInput = pickString(task.description);
+        const assigneeInput = pickString(task.assignee);
+        const deadlineInput = pickString(task.deadline);
+        const estimatedHoursInput = pickNumber(task.estimatedHours);
+        const actualHoursInput = pickNumber(task.actualHours);
+        const parentTaskIdInput = pickString(task.parentTaskId);
+        const severityInput = pickString(task.severity) as CreateTaskData['severity'];
+        const stepsToReproduceInput = pickStringArray(task.stepsToReproduce);
+        const environmentInput = pickString(task.environment);
+        const fixHoursInput = pickNumber(task.fixHours);
+        const acceptanceCriteriaInput = pickStringArray(task.acceptanceCriteria);
+        const storyPointsInput = pickNumber(task.storyPoints);
+        const sprintIdInput = pickString(task.sprintId);
+        const storiesInput = pickStringArray(task.stories);
+        const targetDateInput = parseDate(task.targetDate);
+
+        const allowedTypes: ReadonlyArray<CreateTaskData['type']> = ['Task', 'Subtask', 'Bug', 'Story', 'Epic'];
+        const isTaskType = (value: string): value is CreateTaskData['type'] =>
+            allowedTypes.includes(value as CreateTaskData['type']);
+        if (!isTaskType(typeValue)) {
+            throw new Error(`Unsupported task type: ${typeValue}`);
+        }
+
+        const isPriority = (value: string): value is Priority =>
+            Object.values(Priority).includes(value as Priority);
+        if (!isPriority(priorityValue)) {
+            throw new Error(`Unsupported task priority: ${priorityValue}`);
+        }
+
+        const normalizedType: CreateTaskData['type'] = typeValue;
+        const normalizedPriority: Priority = priorityValue as Priority;
+
+        const validation = validateCreateTaskData({
+            type: normalizedType,
+            priority: normalizedPriority,
+            title: titleInput,
+            description: descriptionInput,
+            assignee: assigneeInput,
+            deadline: deadlineInput,
+            estimatedHours: estimatedHoursInput,
+            actualHours: actualHoursInput,
+            parentTaskId: parentTaskIdInput,
+            severity: severityInput,
+            stepsToReproduce: stepsToReproduceInput,
+            environment: environmentInput,
+            fixHours: fixHoursInput,
+            acceptanceCriteria: acceptanceCriteriaInput,
+            storyPoints: storyPointsInput,
+            sprintId: sprintIdInput,
+            stories: storiesInput,
+            targetDate: targetDateInput
+        });
+
+        if (!validation.success) {
+            throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
+        }
+
+        if (!titleInput || !descriptionInput) {
+            throw new Error('Title and description must be provided');
+        }
+
+        return {
+            id: pickString(task.id),
+            type: normalizedType,
+            priority: normalizedPriority,
+            title: titleInput.trim(),
+            description: descriptionInput.trim(),
+            assignee: assigneeInput,
+            deadline: deadlineInput,
+            estimatedHours: estimatedHoursInput,
+            actualHours: actualHoursInput,
+            parentTaskId: parentTaskIdInput,
+            severity: severityInput,
+            stepsToReproduce: stepsToReproduceInput,
+            environment: environmentInput,
+            fixHours: fixHoursInput,
+            acceptanceCriteria: acceptanceCriteriaInput,
+            storyPoints: storyPointsInput,
+            sprintId: sprintIdInput,
+            stories: storiesInput,
+            targetDate: targetDateInput,
+            status: typeof task.status === 'string' && Object.values(TaskStatus).includes(task.status as TaskStatus)
+                ? (task.status as TaskStatus)
+                : undefined,
+            createdAt: parseDate(task.createdAt),
+            updatedAt: parseDate(task.updatedAt)
+        };
     }
 
     createTask(data: CreateTaskData): TaskType {
         this.validateTaskData(data);
-
-        const id = this.generateId();
-        const title = data.title.trim();
-        const description = data.description.trim();
-        const status = TaskStatus.TODO;
-        const priority = data.priority;
-        const createdAt = new Date();
-        const updatedAt = new Date();
-        const assignee = data.assignee;
-        const deadline = data.deadline;
 
         if (data.type === 'Subtask') {
             if (!data.parentTaskId) {
@@ -161,19 +263,13 @@ export class TaskService {
             }
         }
 
-        const task = this.createTaskInstance(
-            data.type,
-            id,
-            title,
-            description,
-            status,
-            priority,
-            createdAt,
-            updatedAt,
-            assignee,
-            deadline,
-            data as unknown as Record<string, unknown>
-        );
+        const normalizedData: TaskCreationPayload = {
+            ...data,
+            title: data.title.trim(),
+            description: data.description.trim()
+        };
+
+        const task = this.createTaskInstance(normalizedData);
 
         this.tasks.push(task);
         return task;
@@ -200,15 +296,15 @@ export class TaskService {
     }
 
     getSubtasksByParentId(parentId: string): Subtask[] {
-        return this.tasks.filter(task =>
-            task.type === 'Subtask' && (task as Subtask).parentTaskId === parentId
-        ) as Subtask[];
+        return this.tasks.filter((task): task is Subtask =>
+            task.type === 'Subtask' && task.parentTaskId === parentId
+        );
     }
 
     getStoriesBySprintId(sprintId: string): Story[] {
-        return this.tasks.filter(task =>
-            task.type === 'Story' && (task as Story).sprintId === sprintId
-        ) as Story[];
+        return this.tasks.filter((task): task is Story =>
+            task.type === 'Story' && task.sprintId === sprintId
+        );
     }
 
     updateTask(id: string, data: UpdateTaskData): TaskType {
@@ -228,22 +324,23 @@ export class TaskService {
         if (data.deadline !== undefined) existingTask.deadline = data.deadline;
         existingTask.updatedAt = new Date();
 
-        if (existingTask.type === 'Task' || existingTask.type === 'Subtask') {
-            const task = existingTask as Task | Subtask;
-            if (data.estimatedHours !== undefined) task.estimatedHours = data.estimatedHours;
-            if (data.actualHours !== undefined) task.actualHours = data.actualHours;
-        }
-        if (existingTask.type === 'Bug') {
-            const bug = existingTask as Bug;
-            if (data.fixHours !== undefined) bug.fixHours = data.fixHours;
-        }
-        if (existingTask.type === 'Story') {
-            const story = existingTask as Story;
-            if (data.sprintId !== undefined) story.sprintId = data.sprintId;
-        }
-        if (existingTask.type === 'Epic') {
-            const epic = existingTask as Epic;
-            if (data.targetDate !== undefined) epic.targetDate = data.targetDate;
+        switch (existingTask.type) {
+            case 'Task':
+            case 'Subtask':
+                if (data.estimatedHours !== undefined) existingTask.estimatedHours = data.estimatedHours;
+                if (data.actualHours !== undefined) existingTask.actualHours = data.actualHours;
+                break;
+            case 'Bug':
+                if (data.fixHours !== undefined) existingTask.fixHours = data.fixHours;
+                break;
+            case 'Story':
+                if (data.sprintId !== undefined) existingTask.sprintId = data.sprintId;
+                break;
+            case 'Epic':
+                if (data.targetDate !== undefined) existingTask.targetDate = data.targetDate;
+                break;
+            default:
+                break;
         }
 
         return existingTask;
@@ -270,20 +367,9 @@ export class TaskService {
 
     getTaskStatistics(): TaskStatistics {
         const total = this.tasks.length;
-        const byStatus = this.tasks.reduce((acc, task) => {
-            acc[task.status] = (acc[task.status] || 0) + 1;
-            return acc;
-        }, {} as Record<TaskStatus, number>);
-
-        const byPriority = this.tasks.reduce((acc, task) => {
-            acc[task.priority] = (acc[task.priority] || 0) + 1;
-            return acc;
-        }, {} as Record<Priority, number>);
-
-        const byType = this.tasks.reduce((acc, task) => {
-            acc[task.type] = (acc[task.type] || 0) + 1;
-            return acc;
-        }, {} as Record<string, number>);
+        const byStatus = this.countTasksBy(task => task.status);
+        const byPriority = this.countTasksBy(task => task.priority);
+        const byType = this.countTasksBy(task => task.type);
 
         return {
             total,
@@ -317,36 +403,22 @@ export class TaskService {
                 return;
             }
 
-            this.tasks = tasksData.map((taskData: unknown) => {
-                if (typeof taskData !== 'object' || taskData === null) {
-                    throw new Error('Invalid task data');
-                }
-                const task = taskData as Record<string, unknown>;
-                const id = task.id as string;
-                const title = task.title as string;
-                const description = task.description as string;
-                const status = task.status as TaskStatus;
-                const priority = task.priority as Priority;
-                const createdAt = new Date(task.createdAt as string);
-                const updatedAt = new Date(task.updatedAt as string);
-                const assignee = task.assignee as string | undefined;
-                const deadline = task.deadline as string | undefined;
-                const type = task.type as string;
+            const loadedTasks: TaskType[] = [];
 
-                return this.createTaskInstance(
-                    type,
-                    id,
-                    title,
-                    description,
-                    status,
-                    priority,
-                    createdAt,
-                    updatedAt,
-                    assignee,
-                    deadline,
-                    task
-                );
+            tasksData.forEach((taskData: unknown, index: number) => {
+                try {
+                    if (typeof taskData !== 'object' || taskData === null) {
+                        throw new Error('Invalid task data');
+                    }
+
+                    const normalizedTask = this.normalizeTaskDataFromFile(taskData as Record<string, unknown>);
+                    loadedTasks.push(this.createTaskInstance(normalizedTask));
+                } catch (error) {
+                    console.error(`Error loading task at index ${index}:`, error);
+                }
             });
+
+            this.tasks = loadedTasks;
         } catch (error) {
             console.error('Error loading tasks from file:', error);
         }
@@ -358,8 +430,8 @@ export class TaskService {
                 ...task,
                 createdAt: task.createdAt.toISOString(),
                 updatedAt: task.updatedAt.toISOString(),
-                ...(task.type === 'Epic' && 'targetDate' in task && task.targetDate && {
-                    targetDate: (task.targetDate as Date).toISOString()
+                ...(task.type === 'Epic' && task.targetDate && {
+                    targetDate: task.targetDate.toISOString()
                 })
             }));
             const jsonContent = JSON.stringify(tasksForJson, null, 2);
@@ -413,12 +485,14 @@ export class TaskService {
     }
 
     createTaskWithValidation(data: CreateTaskData): TaskOperationResult {
-        const existingTask = this.getTaskById(data.id || this.generateId());
-        if (existingTask) {
-            return {
-                success: false,
-                errors: [messages.taskAlreadyExists(data.id || 'unknown')]
-            };
+        if (data.id) {
+            const existingTask = this.getTaskById(data.id);
+            if (existingTask) {
+                return {
+                    success: false,
+                    errors: [messages.taskAlreadyExists(data.id)]
+                };
+            }
         }
         return this.handleTaskOperationWithSave(() => this.createTask(data));
     }
@@ -549,31 +623,21 @@ export class TaskService {
     }
 
     getTasksBySprint(sprintId: string): TaskType[] {
-        return this.tasks.filter(task => {
-            if (task.type === 'Story') {
-                return 'sprintId' in task && (task as Story).sprintId === sprintId;
-            }
-            return false;
-        });
+        return this.tasks.filter(task =>
+            task.type === 'Story' && task.sprintId === sprintId
+        );
     }
 
     getEnhancedStatistics(): EnhancedTaskStatistics {
         const baseStats = this.getTaskStatistics();
 
-        const byAssignee = this.tasks.reduce((acc, task) => {
-            const assignee = task.assignee || 'Unassigned';
-            acc[assignee] = (acc[assignee] || 0) + 1;
-            return acc;
-        }, {} as Record<string, number>);
+        const byAssignee = this.countTasksBy(task => task.assignee || 'Unassigned');
 
         const overdue = this.getOverdueTasks().length;
         const dueSoon = this.getTasksDueSoon().length;
 
         return {
-            total: baseStats.total,
-            byStatus: baseStats.byStatus as Record<string, number>,
-            byPriority: baseStats.byPriority as Record<string, number>,
-            byType: baseStats.byType,
+            ...baseStats,
             byAssignee,
             overdue,
             dueSoon

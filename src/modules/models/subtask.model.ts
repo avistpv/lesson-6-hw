@@ -1,5 +1,10 @@
-import {TaskStatus, Priority} from '../tasks/task.types';
-import {BaseTaskClass} from './base-task.model';
+import {BaseTaskClass, BaseTaskProps} from './base-task.model';
+
+export interface SubtaskProps extends BaseTaskProps {
+    parentTaskId: string;
+    estimatedHours?: number;
+    actualHours?: number;
+}
 
 export class Subtask extends BaseTaskClass {
     public readonly type: 'Subtask' = 'Subtask';
@@ -7,24 +12,11 @@ export class Subtask extends BaseTaskClass {
     public estimatedHours?: number;
     public actualHours?: number;
 
-    constructor(
-        id: string,
-        title: string,
-        description: string,
-        status: TaskStatus,
-        priority: Priority,
-        createdAt: Date,
-        updatedAt: Date,
-        parentTaskId: string,
-        assignee?: string,
-        deadline?: string,
-        estimatedHours?: number,
-        actualHours?: number
-    ) {
-        super(id, title, description, status, priority, createdAt, updatedAt, assignee, deadline);
-        this.parentTaskId = parentTaskId;
-        this.estimatedHours = estimatedHours;
-        this.actualHours = actualHours;
+    constructor(props: SubtaskProps) {
+        super(props);
+        this.parentTaskId = props.parentTaskId;
+        this.estimatedHours = props.estimatedHours;
+        this.actualHours = props.actualHours;
     }
 
     getTaskInfo(): string {

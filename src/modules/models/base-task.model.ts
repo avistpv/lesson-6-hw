@@ -1,5 +1,17 @@
 import {TaskStatus, Priority} from '../tasks/task.types';
 
+export interface BaseTaskProps {
+    id?: string;
+    title: string;
+    description: string;
+    status?: TaskStatus;
+    priority: Priority;
+    createdAt?: Date;
+    updatedAt?: Date;
+    assignee?: string;
+    deadline?: string;
+}
+
 export abstract class BaseTaskClass {
     public id: string;
     public title: string;
@@ -11,24 +23,28 @@ export abstract class BaseTaskClass {
     public assignee?: string;
     public deadline?: string;
 
-    constructor(
-        id: string,
-        title: string,
-        description: string,
-        status: TaskStatus,
-        priority: Priority,
-        createdAt: Date,
-        updatedAt: Date,
-        assignee?: string,
-        deadline?: string
-    ) {
-        this.id = id;
-        this.title = title;
-        this.description = description;
-        this.status = status;
+    protected static generateIdentifier(): string {
+        return `task_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    }
+
+    constructor({
+                    id,
+                    title,
+                    description,
+                    status,
+                    priority,
+                    createdAt,
+                    updatedAt,
+                    assignee,
+                    deadline
+                }: BaseTaskProps) {
+        this.id = id ?? BaseTaskClass.generateIdentifier();
+        this.title = title.trim();
+        this.description = description.trim();
+        this.status = status ?? TaskStatus.TODO;
         this.priority = priority;
-        this.createdAt = createdAt;
-        this.updatedAt = updatedAt;
+        this.createdAt = createdAt ?? new Date();
+        this.updatedAt = updatedAt ?? new Date();
         this.assignee = assignee;
         this.deadline = deadline;
     }

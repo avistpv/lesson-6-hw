@@ -1,5 +1,10 @@
-import {TaskStatus, Priority} from '../tasks/task.types';
-import {BaseTaskClass} from './base-task.model';
+import {BaseTaskClass, BaseTaskProps} from './base-task.model';
+
+export interface StoryProps extends BaseTaskProps {
+    acceptanceCriteria: string[];
+    storyPoints: number;
+    sprintId?: string;
+}
 
 export class Story extends BaseTaskClass {
     public readonly type: 'Story' = 'Story';
@@ -7,24 +12,11 @@ export class Story extends BaseTaskClass {
     public storyPoints: number;
     public sprintId?: string;
 
-    constructor(
-        id: string,
-        title: string,
-        description: string,
-        status: TaskStatus,
-        priority: Priority,
-        createdAt: Date,
-        updatedAt: Date,
-        acceptanceCriteria: string[],
-        storyPoints: number,
-        assignee?: string,
-        deadline?: string,
-        sprintId?: string
-    ) {
-        super(id, title, description, status, priority, createdAt, updatedAt, assignee, deadline);
-        this.acceptanceCriteria = acceptanceCriteria;
-        this.storyPoints = storyPoints;
-        this.sprintId = sprintId;
+    constructor(props: StoryProps) {
+        super(props);
+        this.acceptanceCriteria = props.acceptanceCriteria;
+        this.storyPoints = props.storyPoints;
+        this.sprintId = props.sprintId;
     }
 
     getTaskInfo(): string {
