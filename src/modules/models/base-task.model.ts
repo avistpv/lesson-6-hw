@@ -1,16 +1,7 @@
-import {TaskStatus, Priority} from '../tasks/task.types';
+import {TaskStatus, Priority, BaseTask} from '../tasks/task.types';
 
-export interface BaseTaskProps {
-    id?: string;
-    title: string;
-    description: string;
-    status?: TaskStatus;
-    priority: Priority;
-    createdAt?: Date;
-    updatedAt?: Date;
-    assignee?: string;
-    deadline?: string;
-}
+export type BaseTaskProps = Pick<BaseTask, 'id' | 'title' | 'description' | 'priority'> &
+    Partial<Pick<BaseTask, 'status' | 'createdAt' | 'updatedAt' | 'assignee' | 'deadline'>>;
 
 export abstract class BaseTaskClass {
     public id: string;
@@ -23,7 +14,7 @@ export abstract class BaseTaskClass {
     public assignee?: string;
     public deadline?: string;
 
-    protected static generateIdentifier(): string {
+    public static generateIdentifier(): string {
         return `task_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
     }
 
@@ -38,7 +29,7 @@ export abstract class BaseTaskClass {
                     assignee,
                     deadline
                 }: BaseTaskProps) {
-        this.id = id ?? BaseTaskClass.generateIdentifier();
+        this.id = id;
         this.title = title.trim();
         this.description = description.trim();
         this.status = status ?? TaskStatus.TODO;

@@ -123,6 +123,32 @@ export function validateDeadline(deadline: unknown, errors: string[]): void {
     }
 }
 
+interface SharedValidationOptions {
+    requireTitle: boolean;
+    requireDescription: boolean;
+    requirePriority: boolean;
+    includeStoryPoints?: boolean;
+}
+
+function validateSharedTaskFields(
+    data: Partial<CreateTaskData> | Partial<UpdateTaskData>,
+    errors: string[],
+    options: SharedValidationOptions
+): void {
+    validateTitle(data.title, options.requireTitle, errors);
+    validateDescription(data.description, options.requireDescription, errors);
+    validatePriority(data.priority, options.requirePriority, errors);
+    validateAssignee(data.assignee, errors);
+    validateDeadline(data.deadline, errors);
+    validateNumericField(data.estimatedHours, 'Estimated hours', errors);
+    validateNumericField(data.actualHours, 'Actual hours', errors);
+    validateNumericField(data.fixHours, 'Fix hours', errors);
+
+    if (options.includeStoryPoints) {
+        validateNumericField((data as Partial<CreateTaskData>).storyPoints, 'Story points', errors);
+    }
+}
+
 export function validateNumericField(value: unknown, fieldName: string, errors: string[]): void {
     if (value !== undefined && value !== null) {
         if (typeof value !== 'number') {
@@ -216,16 +242,13 @@ export function validateCreateTaskData(data: Partial<CreateTaskData> & {
 }): ValidationResult {
     const errors: string[] = [];
 
-    validateTitle(data.title, true, errors);
-    validateDescription(data.description, true, errors);
-    validatePriority(data.priority, true, errors);
+    validateSharedTaskFields(data, errors, {
+        requireTitle: true,
+        requireDescription: true,
+        requirePriority: true,
+        includeStoryPoints: true
+    });
     validateTaskType(data.type, errors);
-    validateAssignee(data.assignee, errors);
-    validateDeadline(data.deadline, errors);
-    validateNumericField(data.estimatedHours, 'Estimated hours', errors);
-    validateNumericField(data.actualHours, 'Actual hours', errors);
-    validateNumericField(data.fixHours, 'Fix hours', errors);
-    validateNumericField(data.storyPoints, 'Story points', errors);
     validateTypeSpecificFields(data, errors);
 
     return {
@@ -237,15 +260,12 @@ export function validateCreateTaskData(data: Partial<CreateTaskData> & {
 export function validateUpdateTaskData(data: Partial<UpdateTaskData>): ValidationResult {
     const errors: string[] = [];
 
-    validateTitle(data.title, false, errors);
-    validateDescription(data.description, false, errors);
-    validatePriority(data.priority, false, errors);
+    validateSharedTaskFields(data, errors, {
+        requireTitle: false,
+        requireDescription: false,
+        requirePriority: false
+    });
     validateStatus(data.status, errors);
-    validateAssignee(data.assignee, errors);
-    validateDeadline(data.deadline, errors);
-    validateNumericField(data.estimatedHours, 'Estimated hours', errors);
-    validateNumericField(data.actualHours, 'Actual hours', errors);
-    validateNumericField(data.fixHours, 'Fix hours', errors);
 
     return {
         success: errors.length === 0,

@@ -68,12 +68,9 @@ export enum BugSeverity {
     CRITICAL = 'CRITICAL'
 }
 
-export interface CreateTaskData {
-    id?: string;
-    title: string;
-    description: string;
-    priority: Priority;
-    assignee?: string;
+export type BaseTaskInputFields = Pick<BaseTask, 'title' | 'description' | 'priority' | 'assignee' | 'deadline'>;
+
+type TaskCreationExtensions = {
     type: 'Task' | 'Subtask' | 'Bug' | 'Story' | 'Epic';
     parentTaskId?: string;
     estimatedHours?: number;
@@ -87,22 +84,19 @@ export interface CreateTaskData {
     targetDate?: Date;
     stories?: string[];
     fixHours?: number;
-    deadline?: string;
-}
+};
 
-export interface UpdateTaskData {
-    title?: string;
-    description?: string;
-    status?: TaskStatus;
-    priority?: Priority;
-    assignee?: string;
+type TaskUpdateExtensions = {
     estimatedHours?: number;
     actualHours?: number;
     fixHours?: number;
     sprintId?: string;
     targetDate?: Date;
-    deadline?: string;
-}
+};
+
+export type CreateTaskData = Partial<Pick<BaseTask, 'id'>> & BaseTaskInputFields & TaskCreationExtensions;
+
+export type UpdateTaskData = Partial<BaseTaskInputFields> & Partial<Pick<BaseTask, 'status'>> & TaskUpdateExtensions;
 
 export interface TaskOperationResult {
     success: boolean;

@@ -16,10 +16,11 @@ import {
 } from './task.types';
 import * as fs from 'fs';
 import {validateCreateTaskData, validateUpdateTaskData} from './task.validator';
-import {Task, Subtask, Bug, Story, Epic} from '../models';
+import {BaseTaskClass, Task, Subtask, Bug, Story, Epic} from '../models';
 import {BaseTaskProps} from '../models/base-task.model';
 
-type TaskCreationPayload = CreateTaskData & {
+type TaskCreationPayload = Omit<CreateTaskData, 'id'> & {
+    id: string;
     status?: TaskStatus;
     createdAt?: Date;
     updatedAt?: Date;
@@ -54,6 +55,10 @@ export class TaskService {
             acc[key] = (acc[key] || 0) + 1;
             return acc;
         }, {} as Record<K, number>);
+    }
+
+    private generateTaskId(): string {
+        return BaseTaskClass.generateIdentifier();
     }
 
     private createTaskInstance(taskData: TaskCreationPayload): TaskType {
@@ -139,10 +144,7 @@ export class TaskService {
         }
 
         const parseDate = (value: unknown): Date | undefined => {
-            if (value instanceof Date) {
-                return value;
-            }
-            if (typeof value === 'string') {
+            if (typeof value === 'string' || typeof value === 'number') {
                 const parsed = new Date(value);
                 if (!Number.isNaN(parsed.getTime())) {
                     return parsed;
@@ -194,11 +196,13 @@ export class TaskService {
         const normalizedType: CreateTaskData['type'] = typeValue;
         const normalizedPriority: Priority = priorityValue as Priority;
 
-        const validation = validateCreateTaskData({
+        const taskId = pickString(task.id) ?? this.generateTaskId();
+
+        const taskInputData: Omit<TaskCreationPayload, 'id' | 'status' | 'createdAt' | 'updatedAt'> = {
             type: normalizedType,
             priority: normalizedPriority,
-            title: titleInput,
-            description: descriptionInput,
+            title: titleInput ?? '',
+            description: descriptionInput ?? '',
             assignee: assigneeInput,
             deadline: deadlineInput,
             estimatedHours: estimatedHoursInput,
@@ -213,7 +217,9 @@ export class TaskService {
             sprintId: sprintIdInput,
             stories: storiesInput,
             targetDate: targetDateInput
-        });
+        };
+
+        const validation = validateCreateTaskData(taskInputData);
 
         if (!validation.success) {
             throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
@@ -223,26 +229,17 @@ export class TaskService {
             throw new Error('Title and description must be provided');
         }
 
+        const trimmedTitle = titleInput.trim();
+        const trimmedDescription = descriptionInput.trim();
+        const normalizedTaskInputData: Omit<TaskCreationPayload, 'id' | 'status' | 'createdAt' | 'updatedAt'> = {
+            ...taskInputData,
+            title: trimmedTitle,
+            description: trimmedDescription
+        };
+
         return {
-            id: pickString(task.id),
-            type: normalizedType,
-            priority: normalizedPriority,
-            title: titleInput.trim(),
-            description: descriptionInput.trim(),
-            assignee: assigneeInput,
-            deadline: deadlineInput,
-            estimatedHours: estimatedHoursInput,
-            actualHours: actualHoursInput,
-            parentTaskId: parentTaskIdInput,
-            severity: severityInput,
-            stepsToReproduce: stepsToReproduceInput,
-            environment: environmentInput,
-            fixHours: fixHoursInput,
-            acceptanceCriteria: acceptanceCriteriaInput,
-            storyPoints: storyPointsInput,
-            sprintId: sprintIdInput,
-            stories: storiesInput,
-            targetDate: targetDateInput,
+            id: taskId,
+            ...normalizedTaskInputData,
             status: typeof task.status === 'string' && Object.values(TaskStatus).includes(task.status as TaskStatus)
                 ? (task.status as TaskStatus)
                 : undefined,
@@ -265,6 +262,7 @@ export class TaskService {
 
         const normalizedData: TaskCreationPayload = {
             ...data,
+            id: data.id ?? this.generateTaskId(),
             title: data.title.trim(),
             description: data.description.trim()
         };
@@ -405,13 +403,13 @@ export class TaskService {
 
             const loadedTasks: TaskType[] = [];
 
-            tasksData.forEach((taskData: unknown, index: number) => {
+            tasksData.forEach((taskData: Record<string, unknown>, index: number) => {
                 try {
                     if (typeof taskData !== 'object' || taskData === null) {
                         throw new Error('Invalid task data');
                     }
 
-                    const normalizedTask = this.normalizeTaskDataFromFile(taskData as Record<string, unknown>);
+                    const normalizedTask = this.normalizeTaskDataFromFile(taskData);
                     loadedTasks.push(this.createTaskInstance(normalizedTask));
                 } catch (error) {
                     console.error(`Error loading task at index ${index}:`, error);
@@ -541,6 +539,9 @@ export class TaskService {
     }
 
     filterTasks(filters: TaskFilters): TaskFilterResult {
+        const deadlineAfterDate = filters.deadlineAfter ? new Date(filters.deadlineAfter) : undefined;
+        const deadlineBeforeDate = filters.deadlineBefore ? new Date(filters.deadlineBefore) : undefined;
+
         const filteredTasks = this.tasks.filter(task => {
             if (filters.status && task.status !== filters.status) return false;
             if (filters.priority && task.priority !== filters.priority) return false;
@@ -548,9 +549,9 @@ export class TaskService {
             if (filters.type && task.type !== filters.type) return false;
             if (filters.createdAfter && new Date(task.createdAt) < new Date(filters.createdAfter)) return false;
             if (filters.createdBefore && new Date(task.createdAt) > new Date(filters.createdBefore)) return false;
-            const taskDeadline = this.getTaskDeadline(task);
-            if (filters.deadlineAfter && (!taskDeadline || new Date(taskDeadline) < new Date(filters.deadlineAfter))) return false;
-            if (filters.deadlineBefore && (!taskDeadline || new Date(taskDeadline) > new Date(filters.deadlineBefore))) return false;
+            const taskDeadline = this.getTaskDeadlineDate(task);
+            if (deadlineAfterDate && (!taskDeadline || taskDeadline < deadlineAfterDate)) return false;
+            if (deadlineBeforeDate && (!taskDeadline || taskDeadline > deadlineBeforeDate)) return false;
 
             return true;
         });
@@ -572,8 +573,8 @@ export class TaskService {
             };
         }
 
-        const deadline = this.getTaskDeadline(task);
-        if (!deadline) {
+        const deadlineDate = this.getTaskDeadlineDate(task);
+        if (!deadlineDate) {
             return {
                 success: true,
                 task,
@@ -583,8 +584,7 @@ export class TaskService {
             };
         }
 
-        const now: Date = new Date();
-        const deadlineDate: Date = new Date(deadline);
+        const now = new Date();
         const daysUntilDeadline: number = Math.ceil((deadlineDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
         const isOverdue: boolean = now > deadlineDate;
         const isCompletedOnTime: boolean = task.status === 'DONE' && !isOverdue;
@@ -599,12 +599,11 @@ export class TaskService {
     }
 
     getOverdueTasks(): TaskType[] {
+        const now = new Date();
         return this.tasks.filter(task => {
-            const deadline = this.getTaskDeadline(task);
-            if (!deadline) return false;
+            const deadlineDate = this.getTaskDeadlineDate(task);
+            if (!deadlineDate) return false;
 
-            const now = new Date();
-            const deadlineDate = new Date(deadline);
             return now > deadlineDate && task.status !== 'DONE';
         });
     }
@@ -614,10 +613,9 @@ export class TaskService {
         const futureDate = new Date(now.getTime() + (days * 24 * 60 * 60 * 1000));
 
         return this.tasks.filter(task => {
-            const deadline = this.getTaskDeadline(task);
-            if (!deadline) return false;
+            const deadlineDate = this.getTaskDeadlineDate(task);
+            if (!deadlineDate) return false;
 
-            const deadlineDate = new Date(deadline);
             return deadlineDate >= now && deadlineDate <= futureDate && task.status !== 'DONE';
         });
     }
@@ -652,6 +650,11 @@ export class TaskService {
             return task.targetDate.toISOString();
         }
         return undefined;
+    }
+
+    private getTaskDeadlineDate(task: TaskType): Date | undefined {
+        const deadline = this.getTaskDeadline(task);
+        return deadline ? new Date(deadline) : undefined;
     }
 
     initializeTasks(): { success: boolean; message: string; error?: string } {
